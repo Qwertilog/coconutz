@@ -22,14 +22,14 @@ def relative_to_assets(path: str) -> Path:
 selected_file = None
 selected_label = None
 
-if getattr(sys, 'frozen', False):  # Running as EXE
+if getattr(sys, 'frozen', False):  # Running as EXE #
     base_dir = Path(sys.executable).parent
-else:  # Running as script
+else:  # Running as script #
     base_dir = Path(__file__).parent
 
 csv_path = base_dir / "coconut_features.csv"
 
-
+# PAGE MANAGEMENT #
 def switch_page(page_name):
     for widget in window.winfo_children():
         if widget is not canvas:
