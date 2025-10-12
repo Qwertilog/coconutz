@@ -4,7 +4,7 @@ from time import sleep
 
 gpio.setwarnings(False)
 gpio.setmode(gpio.BCM)
-gpio.setup(18, gpio.OUT)
+gpio.setup(36, gpio.OUT)
 
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("dark-blue")
@@ -18,11 +18,11 @@ status_label = customtkinter.CTkLabel(master=app, text="Relay off", font=("Arial
 status_label.grid(row=0, column=2, padx=20, pady=20)
 
 def turn_on():
-    gpio.output(18, gpio.HIGH)
+    gpio.output(36, gpio.HIGH)
     status_label.configure(text="Relay on")
 
 def turn_off():
-    gpio.output(18, gpio.LOW)
+    gpio.output(36, gpio.LOW)
     status_label.configure(text="Relay off")
 
 button = customtkinter.CTkButton(master=app, text="Turn on", command=turn_on)
