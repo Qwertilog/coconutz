@@ -12,7 +12,7 @@ from PIL import Image, ImageTk
 
 USE_PICAMERA2 = False
 try: 
-    from picamera2 import PiCamera
+    from picamera2 import PiCamera2
     USE_PICAMERA2 = True
 except ImportError:
     USE_PICAMERA2 = False
@@ -40,10 +40,9 @@ else:  # Running as script
 
 csv_path = base_dir / "coconut_features.csv"
 
-folder_path1 = base_dir / "Data Collection Captures"
-folder_path2 = base_dir / "Data Detection Captures"
-os.makedirs(folder_path1, exist_ok=True)
-os.makedirs(folder_path2, exist_ok=True)
+for folder_name in ["Data Collection Captures", "Data Detection Captures"]:
+    os.makedirs(base_dir / folder_name, exist_ok=True)
+
 
 def switch_page(page_name):
     for widget in window.winfo_children():
