@@ -12,7 +12,7 @@ from PIL import Image, ImageTk
 
 USE_PICAMERA2 = False
 try: 
-    from picamera2 import PiCamera2
+    from picamera2 import Picamera2
     USE_PICAMERA2 = True
 except ImportError:
     USE_PICAMERA2 = False
