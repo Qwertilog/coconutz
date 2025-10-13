@@ -12,11 +12,17 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from scipy.signal import butter, filtfilt
 
 # -------------------------
+# Environment fix for Raspberry Pi (ALSA only)
+# -------------------------
+os.environ["PULSE_SERVER"] = ""
+os.environ["SDL_AUDIODRIVER"] = "alsa"
+
+# -------------------------
 # Audio parameters
 # -------------------------
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 16000       # <<< Fixed rate to 16 kHz
+RATE = 16000      # target rate
 CHUNK = 1024
 RECORD_SECONDS = 2
 FOLDER = "recordings"
@@ -51,10 +57,18 @@ def get_valid_input_device(p):
     for i in range(p.get_device_count()):
         info = p.get_device_info_by_index(i)
         print(f"{i}: {info['name']} (inputs: {info['maxInputChannels']})")
+        # Prefer ALSA/USB devices over Pulse
+        if info["maxInputChannels"] > 0 and (
+            "USB" in info["name"] or "ALSA" in info["name"] or "plughw" in info["name"]
+        ):
+            selected_device = i
+            break
         if info["maxInputChannels"] > 0 and selected_device is None:
             selected_device = i
+
     if selected_device is None:
         raise RuntimeError("No valid input device found!")
+
     print(f"Using input device #{selected_device}\n")
     return selected_device
 
@@ -111,7 +125,7 @@ class MainPage(ctk.CTkFrame):
         ctk.CTkLabel(self, text="Click Record to start", font=("Arial", 20)).pack(pady=15)
         self.status_label = ctk.CTkLabel(self, text="Status: Not Recording", font=("Arial", 14))
         self.status_label.pack(pady=10)
-        ctk.CTkLabel(self, text="2 second audio clip @ 16 kHz", font=("Arial", 12)).pack(pady=2)
+        ctk.CTkLabel(self, text="2 second audio clip (auto sample rate)", font=("Arial", 12)).pack(pady=2)
         self.record_button = ctk.CTkButton(self, text="Record", command=self.start_recording)
         self.record_button.pack(pady=20)
 
@@ -126,14 +140,20 @@ class MainPage(ctk.CTkFrame):
         audio = pyaudio.PyAudio()
         try:
             device_index = get_valid_input_device(audio)
-            stream = audio.open(format=FORMAT,
-                                channels=CHANNELS,
-                                rate=RATE,
-                                input=True,
-                                frames_per_buffer=CHUNK,
-                                input_device_index=device_index)
+            # Try 16 kHz, fallback to 44.1 kHz
+            try:
+                rate = RATE
+                stream = audio.open(format=FORMAT, channels=CHANNELS, rate=rate,
+                                    input=True, frames_per_buffer=CHUNK,
+                                    input_device_index=device_index)
+            except Exception:
+                rate = 44100
+                print("⚠️ 16kHz not supported, using 44.1kHz instead.")
+                stream = audio.open(format=FORMAT, channels=CHANNELS, rate=rate,
+                                    input=True, frames_per_buffer=CHUNK,
+                                    input_device_index=device_index)
 
-            frames = [stream.read(CHUNK) for _ in range(int(RATE / CHUNK * RECORD_SECONDS))]
+            frames = [stream.read(CHUNK) for _ in range(int(rate / CHUNK * RECORD_SECONDS))]
             stream.stop_stream()
             stream.close()
 
@@ -145,7 +165,7 @@ class MainPage(ctk.CTkFrame):
             with wave.open(filepath, 'wb') as wf:
                 wf.setnchannels(CHANNELS)
                 wf.setsampwidth(audio.get_sample_size(FORMAT))
-                wf.setframerate(RATE)
+                wf.setframerate(rate)
                 wf.writeframes(b''.join(frames))
 
             gui_queue.put({"type": "record_done", "filepath": filepath})
@@ -194,7 +214,7 @@ class SpectrumPage(ctk.CTkFrame):
         if not self.filepath:
             return
 
-        signal, sr = librosa.load(self.filepath, sr=RATE)  # force 16k
+        signal, sr = librosa.load(self.filepath, sr=None)  # load at actual recorded rate
         signal = signal - np.mean(signal)
         signal = low_pass_filter(signal, sr, cutoff=1000)
 
@@ -207,7 +227,7 @@ class SpectrumPage(ctk.CTkFrame):
         self.ax.plot(frequency[1:half], magnitude[1:half])
         self.ax.set_xlabel("Frequency (Hz)")
         self.ax.set_ylabel("Magnitude")
-        self.ax.set_title("FFT Spectrum (Low-Pass 1kHz, 16kHz Sampling)")
+        self.ax.set_title(f"FFT Spectrum (Low-Pass 1kHz, {sr/1000:.1f}kHz Sampling)")
         self.fig.tight_layout()
         self.canvas.draw_idle()
 
