@@ -4,19 +4,18 @@ import tkinter as tk
 import sys
 import time
 
-# --- AUDIO CONFIGURATION (UPDATE THESE VALUES!) ---
-# CRITICAL: Use the index found via 'arecord -l'. Since your device is 'card 0', the index is 0.
-INMP441_DEVICE_INDEX = 0        
+# --- AUDIO CONFIGURATION (Based on successful ALSA tests) ---
+INMP441_DEVICE_INDEX = 0        # Confirmed index (Card 0)
 CHUNK = 1024
-FORMAT = pyaudio.paInt32        # INMP441 typically uses 32-bit audio
-CHANNELS = 1                    # Start with 1 (Mono). If this fails, try 2.
-RATE = 44100                    # A common, reliable sample rate.
+FORMAT = pyaudio.paInt32        # 32-bit format (Standard for INMP441 on RPi)
+CHANNELS = 2                    # Confirmed working channel count (Stereo)
+RATE = 48000                    # Confirmed actual rate used by the driver
 
 # --- PyAudio Setup ---
 p = pyaudio.PyAudio()
 
 try:
-    # Attempt to open the audio stream with the specified parameters
+    # Attempt to open the audio stream
     stream = p.open(format=FORMAT,
                     channels=CHANNELS,
                     rate=RATE,
@@ -30,12 +29,11 @@ except Exception as e:
     print(f"❌ Error opening audio stream: {e}")
     root = tk.Tk()
     root.title("Mic Check Error")
-    tk.Label(root, text=f"ERROR: Could not open audio stream.\n\nDetails: {e}\n\nCheck Index, Channels, and Wiring.", 
+    tk.Label(root, text=f"ERROR: Could not open audio stream.\n\nDetails: {e}", 
              fg="red", font=("Helvetica", 12)).pack(padx=20, pady=20)
     root.update()
-    root.after(5000, root.destroy) # Close after 5 seconds to show the error
+    root.after(5000, root.destroy)
     root.mainloop()
-    # Ensure all PyAudio resources are released on error
     p.terminate()
     sys.exit()
 
@@ -55,23 +53,30 @@ status_label.pack(pady=(0, 10))
 
 # Function to calculate and update volume
 def update_volume():
-    """Reads audio data, calculates RMS volume, and updates the GUI."""
+    """Reads audio data, calculates RMS volume on the first channel, and updates the GUI."""
     try:
         # 1. Read a chunk of data
-        # exception_on_overflow=False is important on the RPi
         data = stream.read(CHUNK, exception_on_overflow=False)
         
-        # 2. Convert raw data (bytes) to NumPy array (32-bit integers)
-        audio_data = np.frombuffer(data, dtype=np.int32)
+        # 2. Convert raw data (bytes) to NumPy array
+        # Using '<i4' specifies little-endian 4-byte (32-bit) integers.
+        audio_data = np.frombuffer(data, dtype='<i4')
         
-        # 3. Calculate Root Mean Square (RMS) volume level
-        rms = np.sqrt(np.mean(audio_data**2))
+        # 3. CRITICAL: Slice the data to read ONLY the first channel.
+        # This prevents the NaN crash from corrupted data in the second channel.
+        # The '::2' slicing takes every second sample, which is the left/first channel.
+        left_channel_data = audio_data[::2]
         
-        # 4. Scale the RMS value for a readable display (adjust the divisor as needed)
-        # Using 10000 provides a reasonable range for typical 32-bit audio input
+        # 4. Calculate Root Mean Square (RMS) volume level on the valid channel
+        if left_channel_data.size == 0:
+            rms = 0
+        else:
+            rms = np.sqrt(np.mean(left_channel_data**2))
+        
+        # 5. Scale the RMS value for a readable display
         scaled_volume = int(rms / 10000)
         
-        # 5. Update the UI label and color
+        # 6. Update the UI label and color
         volume_label.config(text=f"Volume: {scaled_volume}")
         
         if scaled_volume > 200:
@@ -84,27 +89,4 @@ def update_volume():
     except IOError as e:
         # Common error when the audio buffer is slightly slow
         if e.errno == -9988:
-            print("PyAudio buffer overflow (dropped frames).")
-        else:
-            print(f"IOError: {e}")
-
-    except Exception as e:
-        print(f"An unexpected error occurred during reading: {e}")
-        # Stop further updates if a critical error occurs
-        return
-
-    # Schedule the function to run again after 50 milliseconds
-    root.after(50, update_volume)
-
-# Start the periodic update process
-update_volume()
-
-# Start the Tkinter main loop (this keeps the GUI running)
-root.mainloop()
-
-# --- Cleanup (Runs after the GUI is closed) ---
-print("Closing stream and PyAudio...")
-if 'stream' in locals() and stream.is_active():
-    stream.stop_stream()
-    stream.close()
-p.terminate()
+            print("Py
