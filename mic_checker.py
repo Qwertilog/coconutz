@@ -4,7 +4,6 @@ import tkinter as tk
 import sys
 import time
 
-#new mic checker
 # --- AUDIO CONFIGURATION (Based on successful ALSA tests) ---
 INMP441_DEVICE_INDEX = 0        # Confirmed index (Card 0)
 CHUNK = 1024
@@ -90,4 +89,27 @@ def update_volume():
     except IOError as e:
         # Common error when the audio buffer is slightly slow
         if e.errno == -9988:
-            print("Py
+            print("PyAudio buffer overflow (dropped frames).")
+        # Continue the loop on overflow
+        pass 
+
+    except Exception as e:
+        print(f"An unexpected error occurred during reading: {e}")
+        # Stop further updates if a critical error occurs
+        return
+
+    # Schedule the function to run again after 50 milliseconds
+    root.after(50, update_volume)
+
+# Start the periodic update process
+update_volume()
+
+# Start the Tkinter main loop (this keeps the GUI running)
+root.mainloop()
+
+# --- Cleanup (Runs after the GUI is closed) ---
+print("Closing stream and PyAudio...")
+if 'stream' in locals() and stream.is_active():
+    stream.stop_stream()
+    stream.close()
+p.terminate()
