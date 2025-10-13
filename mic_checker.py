@@ -4,6 +4,7 @@ import tkinter as tk
 import sys
 import time
 
+#new mic checker
 # --- AUDIO CONFIGURATION (Based on successful ALSA tests) ---
 INMP441_DEVICE_INDEX = 0        # Confirmed index (Card 0)
 CHUNK = 1024
