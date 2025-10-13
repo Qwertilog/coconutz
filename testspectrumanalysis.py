@@ -3,7 +3,8 @@ import threading
 import queue
 import numpy as np
 import customtkinter as ctk
-import pyaudio
+# import pyaudio # REMOVED: Replaced by pvrecorder
+import pvrecorder # ADDED: For I2S microphone access
 import wave
 import librosa
 import scipy.fft as sp
@@ -12,13 +13,16 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from scipy.signal import butter, filtfilt
 
 # -------------------------
-# Audio parameters
+# Audio parameters (CRITICAL: Adjusted for INMP441 I2S Mic)
 # -------------------------
-FORMAT = pyaudio.paInt16
+# Use a simple flag for format, as pvrecorder handles the details.
+# The INMP441 driver often performs best at 48000 Hz with 32-bit internal data.
 CHANNELS = 1
-RATE = 44100
-CHUNK = 1024
+RATE = 48000
+CHUNK = 1024 # Note: pvrecorder uses frame_length, set to 1024 frames/buffer
 RECORD_SECONDS = 2
+DEVICE_INDEX = 2 # CRITICAL: Set this to the working index (1 or 2, based on troubleshooting)
+
 FOLDER = "recordings"
 os.makedirs(FOLDER, exist_ok=True)
 
@@ -99,7 +103,7 @@ class MainPage(ctk.CTkFrame):
         ctk.CTkLabel(self, text="Click Record to start", font=("Arial", 20)).pack(pady=15)
         self.status_label = ctk.CTkLabel(self, text="Status: Not Recording", font=("Arial", 14))
         self.status_label.pack(pady=10)
-        ctk.CTkLabel(self, text="2 second audio clip", font=("Arial", 12)).pack(pady=2)
+        ctk.CTkLabel(self, text=f"{RECORD_SECONDS} second audio clip at {RATE} Hz", font=("Arial", 12)).pack(pady=2)
         self.record_button = ctk.CTkButton(self, text="Record", command=self.start_recording)
         self.record_button.pack(pady=20)
 
@@ -111,13 +115,36 @@ class MainPage(ctk.CTkFrame):
             threading.Thread(target=self.record_audio_worker, daemon=True).start()
 
     def record_audio_worker(self):
-        audio = pyaudio.PyAudio()
-        stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
-        frames = [stream.read(CHUNK) for _ in range(int(RATE / CHUNK * RECORD_SECONDS))]
-        stream.stop_stream()
-        stream.close()
-        audio.terminate()
+        # *** PvRecorder Implementation ***
+        frames = []
+        try:
+            # Initialize pvrecorder
+            recorder = pvrecorder.PvRecorder(
+                frame_length=CHUNK,
+                device_index=DEVICE_INDEX)
+            
+            # pvrecorder uses an internal format that is determined by the driver,
+            # which for INMP441 is 32-bit. We use a total number of frames.
+            total_frames = int(RATE / CHUNK * RECORD_SECONDS)
+            
+            recorder.start()
+            
+            for _ in range(total_frames):
+                # pvrecorder returns a list of signed 32-bit integers
+                frame = recorder.read()
+                # Convert the list of integers to a 32-bit bytes object
+                # and append to frames list for saving.
+                frames.append(np.array(frame, dtype=np.int32).tobytes())
+            
+            recorder.stop()
+            recorder.delete()
+            
+        except Exception as e:
+            print(f"PvRecorder Error: {e}")
+            gui_queue.put({"type": "record_done", "filepath": "ERROR"})
+            return
 
+        # *** Save WAV File ***
         i = 1
         while os.path.isfile(os.path.join(FOLDER, f"recording{i}.wav")):
             i += 1
@@ -125,7 +152,8 @@ class MainPage(ctk.CTkFrame):
 
         with wave.open(filepath, 'wb') as wf:
             wf.setnchannels(CHANNELS)
-            wf.setsampwidth(audio.get_sample_size(FORMAT))
+            # CRITICAL: We save the file as 32-bit (4 bytes) to match the INMP441 driver
+            wf.setsampwidth(4) # 4 bytes = 32-bit
             wf.setframerate(RATE)
             wf.writeframes(b''.join(frames))
 
@@ -134,7 +162,10 @@ class MainPage(ctk.CTkFrame):
     def update_status(self, filepath):
         self.recording = False
         self.record_button.configure(fg_color="#1F6AA5", hover_color="#144870")
-        self.status_label.configure(text=f"Saved: {filepath}")
+        if filepath == "ERROR":
+            self.status_label.configure(text="Status: Recording Failed!", fg_color="red")
+        else:
+            self.status_label.configure(text=f"Saved: {filepath}", fg_color="transparent")
 
 # -------------------------
 # SpectrumPage (Responsive)
@@ -162,6 +193,10 @@ class SpectrumPage(ctk.CTkFrame):
 
         # Bind resize event
         self.plot_frame.bind("<Configure>", self.on_resize)
+        
+        # Back button
+        ctk.CTkButton(self, text="New Recording", command=lambda: controller.show_page("MainPage")).pack(pady=5)
+
 
     def update_spectrum(self, filepath):
         self.filepath = filepath
@@ -169,10 +204,13 @@ class SpectrumPage(ctk.CTkFrame):
         self.plot_spectrum()
 
     def plot_spectrum(self):
-        if not self.filepath:
+        if not self.filepath or self.filepath == "ERROR":
+            self.ax.clear()
+            self.ax.text(0.5, 0.5, "Error: No Audio Data", ha='center', va='center', fontsize=14)
+            self.canvas.draw_idle()
             return
 
-        # Load audio
+        # Load audio (Librosa handles the 32-bit WAV automatically)
         signal, sr = librosa.load(self.filepath, sr=None)
 
         # Remove DC
@@ -197,9 +235,12 @@ class SpectrumPage(ctk.CTkFrame):
         self.canvas.draw_idle()
 
     def on_resize(self, event):
+        # This function ensures the plot resizes correctly within the frame.
         width, height = event.width, event.height
         dpi = self.fig.get_dpi()
-        self.fig.set_size_inches(width/dpi, height/dpi)
+        # Subtract some padding to prevent a tight fit causing scrollbars
+        self.fig.set_size_inches((width-10)/dpi, (height-10)/dpi) 
+        self.fig.tight_layout()
         self.canvas.draw_idle()
 
 # -------------------------
