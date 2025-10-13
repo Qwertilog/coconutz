@@ -4,12 +4,13 @@ import tkinter as tk
 import sys
 import time
 
-# --- AUDIO CONFIGURATION (Based on successful ALSA tests) ---
+# --- AUDIO CONFIGURATION (Most Robust Settings for INMP441/PyAudio) ---
+# We are switching to 16-bit Mono, which is less likely to suffer from 32-bit data corruption.
 INMP441_DEVICE_INDEX = 0        # Confirmed index (Card 0)
 CHUNK = 1024
-FORMAT = pyaudio.paInt32        # 32-bit format (Standard for INMP441 on RPi)
-CHANNELS = 2                    # Confirmed working channel count (Stereo)
-RATE = 48000                    # Confirmed actual rate used by the driver
+FORMAT = pyaudio.paInt16        # CHANGED to 16-bit format (paInt16) for stability
+CHANNELS = 1                    # CHANGED to 1 (Mono)
+RATE = 44100                    # Set to a common, standard sample rate
 
 # --- PyAudio Setup ---
 p = pyaudio.PyAudio()
@@ -59,13 +60,11 @@ def update_volume():
         data = stream.read(CHUNK, exception_on_overflow=False)
         
         # 2. Convert raw data (bytes) to NumPy array
-        # Using '<i4' specifies little-endian 4-byte (32-bit) integers.
-        audio_data = np.frombuffer(data, dtype='<i4')
+        # CRITICAL CHANGE: Use '<i2' for 16-bit little-endian integer to match paInt16
+        audio_data = np.frombuffer(data, dtype='<i2') 
         
-        # 3. CRITICAL: Slice the data to read ONLY the first channel.
-        # This prevents the NaN crash from corrupted data in the second channel.
-        # The '::2' slicing takes every second sample, which is the left/first channel.
-        left_channel_data = audio_data[::2]
+        # 3. No slicing needed since CHANNELS=1
+        left_channel_data = audio_data
         
         # 4. Calculate Root Mean Square (RMS) volume level on the valid channel
         if left_channel_data.size == 0:
@@ -74,42 +73,7 @@ def update_volume():
             rms = np.sqrt(np.mean(left_channel_data**2))
         
         # 5. Scale the RMS value for a readable display
-        scaled_volume = int(rms / 10000)
+        # The divisor is significantly smaller for 16-bit audio (max value is 32767).
+        scaled_volume = int(rms / 300)
         
         # 6. Update the UI label and color
-        volume_label.config(text=f"Volume: {scaled_volume}")
-        
-        if scaled_volume > 200:
-            volume_label.config(fg="red")     # Loud
-        elif scaled_volume > 50:
-            volume_label.config(fg="orange")  # Medium
-        else:
-            volume_label.config(fg="green")   # Quiet/Ambient
-
-    except IOError as e:
-        # Common error when the audio buffer is slightly slow
-        if e.errno == -9988:
-            print("PyAudio buffer overflow (dropped frames).")
-        # Continue the loop on overflow
-        pass 
-
-    except Exception as e:
-        print(f"An unexpected error occurred during reading: {e}")
-        # Stop further updates if a critical error occurs
-        return
-
-    # Schedule the function to run again after 50 milliseconds
-    root.after(50, update_volume)
-
-# Start the periodic update process
-update_volume()
-
-# Start the Tkinter main loop (this keeps the GUI running)
-root.mainloop()
-
-# --- Cleanup (Runs after the GUI is closed) ---
-print("Closing stream and PyAudio...")
-if 'stream' in locals() and stream.is_active():
-    stream.stop_stream()
-    stream.close()
-p.terminate()
