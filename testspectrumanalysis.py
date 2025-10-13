@@ -3,8 +3,7 @@ import threading
 import queue
 import numpy as np
 import customtkinter as ctk
-# import pyaudio # REMOVED: Replaced by pvrecorder
-import pvrecorder # ADDED: For I2S microphone access
+import pvrecorder # Replaced pyaudio
 import wave
 import librosa
 import scipy.fft as sp
@@ -15,13 +14,11 @@ from scipy.signal import butter, filtfilt
 # -------------------------
 # Audio parameters (CRITICAL: Adjusted for INMP441 I2S Mic)
 # -------------------------
-# Use a simple flag for format, as pvrecorder handles the details.
-# The INMP441 driver often performs best at 48000 Hz with 32-bit internal data.
 CHANNELS = 1
-RATE = 48000
-CHUNK = 1024 # Note: pvrecorder uses frame_length, set to 1024 frames/buffer
+RATE = 48000 # Optimized rate for INMP441
+CHUNK = 1024 # Frame length for pvrecorder
 RECORD_SECONDS = 2
-DEVICE_INDEX = 2 # CRITICAL: Set this to the working index (1 or 2, based on troubleshooting)
+DEVICE_INDEX = 2 # Set to Device Card Index 2 as requested
 
 FOLDER = "recordings"
 os.makedirs(FOLDER, exist_ok=True)
@@ -86,6 +83,8 @@ class SpectrumAnalyzerApp(ctk.CTk):
             if msg["type"] == "record_done":
                 filepath = msg["filepath"]
                 self.pages["MainPage"].update_status(filepath)
+                # CRASH LOCATION: This line calls librosa, which uses the conflicting packages.
+                # Ensure you have run: pip install --upgrade numba
                 self.pages["SpectrumPage"].update_spectrum(filepath)
                 self.show_page("SpectrumPage")
         self.after(100, self.process_queue)
@@ -123,17 +122,16 @@ class MainPage(ctk.CTkFrame):
                 frame_length=CHUNK,
                 device_index=DEVICE_INDEX)
             
-            # pvrecorder uses an internal format that is determined by the driver,
-            # which for INMP441 is 32-bit. We use a total number of frames.
+            # Calculate total frames needed
             total_frames = int(RATE / CHUNK * RECORD_SECONDS)
             
             recorder.start()
             
             for _ in range(total_frames):
-                # pvrecorder returns a list of signed 32-bit integers
+                # pvrecorder returns a list of integers
                 frame = recorder.read()
                 # Convert the list of integers to a 32-bit bytes object
-                # and append to frames list for saving.
+                # CRITICAL: We use int32 to match the S32_LE format of the I2S mic driver
                 frames.append(np.array(frame, dtype=np.int32).tobytes())
             
             recorder.stop()
@@ -152,8 +150,8 @@ class MainPage(ctk.CTkFrame):
 
         with wave.open(filepath, 'wb') as wf:
             wf.setnchannels(CHANNELS)
-            # CRITICAL: We save the file as 32-bit (4 bytes) to match the INMP441 driver
-            wf.setsampwidth(4) # 4 bytes = 32-bit
+            # CRITICAL: Set sample width to 4 bytes (32-bit)
+            wf.setsampwidth(4) 
             wf.setframerate(RATE)
             wf.writeframes(b''.join(frames))
 
@@ -211,6 +209,7 @@ class SpectrumPage(ctk.CTkFrame):
             return
 
         # Load audio (Librosa handles the 32-bit WAV automatically)
+        # NOTE: This is the section that requires a fixed Numba/NumPy environment.
         signal, sr = librosa.load(self.filepath, sr=None)
 
         # Remove DC
@@ -235,10 +234,8 @@ class SpectrumPage(ctk.CTkFrame):
         self.canvas.draw_idle()
 
     def on_resize(self, event):
-        # This function ensures the plot resizes correctly within the frame.
         width, height = event.width, event.height
         dpi = self.fig.get_dpi()
-        # Subtract some padding to prevent a tight fit causing scrollbars
         self.fig.set_size_inches((width-10)/dpi, (height-10)/dpi) 
         self.fig.tight_layout()
         self.canvas.draw_idle()
