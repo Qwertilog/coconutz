@@ -77,3 +77,39 @@ def update_volume():
         scaled_volume = int(rms / 300)
         
         # 6. Update the UI label and color
+        volume_label.config(text=f"Volume: {scaled_volume}")
+        
+        if scaled_volume > 100:
+            volume_label.config(fg="red")     # Loud
+        elif scaled_volume > 20:
+            volume_label.config(fg="orange")  # Medium
+        else:
+            volume_label.config(fg="green")   # Quiet/Ambient
+
+    except IOError as e:
+        # Common error when the audio buffer is slightly slow
+        if e.errno == -9988:
+            print("PyAudio buffer overflow (dropped frames).")
+        # Continue the loop on overflow
+        pass 
+
+    except Exception as e:
+        print(f"An unexpected error occurred during reading: {e}")
+        # Stop further updates if a critical error occurs
+        return
+
+    # Schedule the function to run again after 50 milliseconds
+    root.after(50, update_volume)
+
+# Start the periodic update process
+update_volume()
+
+# Start the Tkinter main loop (this keeps the GUI running)
+root.mainloop()
+
+# --- Cleanup (Runs after the GUI is closed) ---
+print("Closing stream and PyAudio...")
+if 'stream' in locals() and stream.is_active():
+    stream.stop_stream()
+    stream.close()
+p.terminate()
