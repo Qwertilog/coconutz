@@ -16,7 +16,7 @@ from scipy.signal import butter, filtfilt
 # -------------------------
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 16000
+RATE = 16000       # <<< Fixed rate to 16 kHz
 CHUNK = 1024
 RECORD_SECONDS = 2
 FOLDER = "recordings"
@@ -43,16 +43,20 @@ def low_pass_filter(signal, sr, cutoff=1000):
     return filtfilt(b, a, signal)
 
 # -------------------------
-# Find available input device (for Raspberry Pi)
+# Get valid input device
 # -------------------------
 def get_valid_input_device(p):
-    print("\n=== Audio Devices ===")
+    print("\n=== Available Audio Devices ===")
+    selected_device = None
     for i in range(p.get_device_count()):
         info = p.get_device_info_by_index(i)
-        print(f"{i}: {info['name']} (inputs: {info['maxInputChannels']}, rate: {info['defaultSampleRate']})")
-        if info["maxInputChannels"] > 0:
-            return i, int(info["defaultSampleRate"])
-    raise RuntimeError("No valid audio input device found!")
+        print(f"{i}: {info['name']} (inputs: {info['maxInputChannels']})")
+        if info["maxInputChannels"] > 0 and selected_device is None:
+            selected_device = i
+    if selected_device is None:
+        raise RuntimeError("No valid input device found!")
+    print(f"Using input device #{selected_device}\n")
+    return selected_device
 
 # -------------------------
 # Main App
@@ -64,13 +68,11 @@ class SpectrumAnalyzerApp(ctk.CTk):
         self.geometry("480x320")
         self.resizable(False, False)
 
-        # Container frame
         self.container = ctk.CTkFrame(self)
         self.container.pack(fill="both", expand=True)
         self.container.grid_rowconfigure(0, weight=1)
         self.container.grid_columnconfigure(0, weight=1)
 
-        # Pages
         self.pages = {}
         self.pages["MainPage"] = MainPage(self.container, self)
         self.pages["SpectrumPage"] = SpectrumPage(self.container, self)
@@ -109,7 +111,7 @@ class MainPage(ctk.CTkFrame):
         ctk.CTkLabel(self, text="Click Record to start", font=("Arial", 20)).pack(pady=15)
         self.status_label = ctk.CTkLabel(self, text="Status: Not Recording", font=("Arial", 14))
         self.status_label.pack(pady=10)
-        ctk.CTkLabel(self, text="2 second audio clip", font=("Arial", 12)).pack(pady=2)
+        ctk.CTkLabel(self, text="2 second audio clip @ 16 kHz", font=("Arial", 12)).pack(pady=2)
         self.record_button = ctk.CTkButton(self, text="Record", command=self.start_recording)
         self.record_button.pack(pady=20)
 
@@ -123,17 +125,15 @@ class MainPage(ctk.CTkFrame):
     def record_audio_worker(self):
         audio = pyaudio.PyAudio()
         try:
-            device_index, valid_rate = get_valid_input_device(audio)
-            print(f"\nUsing input device {device_index} at {valid_rate} Hz\n")
-
+            device_index = get_valid_input_device(audio)
             stream = audio.open(format=FORMAT,
                                 channels=CHANNELS,
-                                rate=valid_rate,
+                                rate=RATE,
                                 input=True,
                                 frames_per_buffer=CHUNK,
                                 input_device_index=device_index)
 
-            frames = [stream.read(CHUNK) for _ in range(int(valid_rate / CHUNK * RECORD_SECONDS))]
+            frames = [stream.read(CHUNK) for _ in range(int(RATE / CHUNK * RECORD_SECONDS))]
             stream.stop_stream()
             stream.close()
 
@@ -145,7 +145,7 @@ class MainPage(ctk.CTkFrame):
             with wave.open(filepath, 'wb') as wf:
                 wf.setnchannels(CHANNELS)
                 wf.setsampwidth(audio.get_sample_size(FORMAT))
-                wf.setframerate(valid_rate)
+                wf.setframerate(RATE)
                 wf.writeframes(b''.join(frames))
 
             gui_queue.put({"type": "record_done", "filepath": filepath})
@@ -194,7 +194,7 @@ class SpectrumPage(ctk.CTkFrame):
         if not self.filepath:
             return
 
-        signal, sr = librosa.load(self.filepath, sr=None)
+        signal, sr = librosa.load(self.filepath, sr=RATE)  # force 16k
         signal = signal - np.mean(signal)
         signal = low_pass_filter(signal, sr, cutoff=1000)
 
@@ -207,7 +207,7 @@ class SpectrumPage(ctk.CTkFrame):
         self.ax.plot(frequency[1:half], magnitude[1:half])
         self.ax.set_xlabel("Frequency (Hz)")
         self.ax.set_ylabel("Magnitude")
-        self.ax.set_title("FFT Spectrum (Low-Pass 1kHz)")
+        self.ax.set_title("FFT Spectrum (Low-Pass 1kHz, 16kHz Sampling)")
         self.fig.tight_layout()
         self.canvas.draw_idle()
 
