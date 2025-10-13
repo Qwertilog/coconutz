@@ -1,10 +1,21 @@
 from pathlib import Path
-from tkinter import Tk, Canvas, Text, Button, PhotoImage, filedialog
+from tkinter import Tk, Canvas, Text, Button, PhotoImage, filedialog, messagebox
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import cv2
 import numpy as np
 import pandas as pd
 import sys
+import os
+import time
+import platform
+from PIL import Image, ImageTk
+
+USE_PICAMERA2 = False
+try: 
+    from picamera2 import Picamera2
+    USE_PICAMERA2 = True
+except ImportError:
+    USE_PICAMERA2 = False
 
 
 def get_base_path():
@@ -22,14 +33,17 @@ def relative_to_assets(path: str) -> Path:
 selected_file = None
 selected_label = None
 
-if getattr(sys, 'frozen', False):  # Running as EXE #
+if getattr(sys, 'frozen', False):  # Running as EXE
     base_dir = Path(sys.executable).parent
-else:  # Running as script #
+else:  # Running as script
     base_dir = Path(__file__).parent
 
 csv_path = base_dir / "coconut_features.csv"
 
-# PAGE MANAGEMENT #
+for folder_name in ["Data Collection Captures", "Data Detection Captures"]:
+    os.makedirs(base_dir / folder_name, exist_ok=True)
+
+
 def switch_page(page_name):
     for widget in window.winfo_children():
         if widget is not canvas:
@@ -41,6 +55,7 @@ def switch_page(page_name):
         "data_collection2": load_data_collection_page_2,
         "data_collection3": load_data_collection_page_3,
         "data_collection4": load_data_collection_page_4,
+        "data_detection1": load_data_detection_page_1,
     }
 
     if page_name in pages:
@@ -155,7 +170,7 @@ def load_main_page():
     create_button(
         datadetection_img, datadetection_hover,
         77, 219, 233, 46,
-        lambda: switch_page("main")
+        lambda: switch_page("data_detection1")
     )
 
 def load_data_collection_page_1():
@@ -245,9 +260,101 @@ def load_data_collection_page_4():
         lambda: switch_page("main")
     )
 
+# --- CAMERA PAGE INTEGRATED HERE ---
 def load_data_detection_page_1():
-    create_text("Data Detection Page\n(Placeholder)", 37, 100, 313, 61, 24)
 
+    create_text("Camera Capture", 37, 10, 313, 40, 20)
+    
+
+    # --- Camera Preview Canvas ---
+    cam_canvas = Canvas(window, 
+                        width=320, 
+                        height=200, 
+                        bg="#5A56C8", 
+                        highlightthickness=0, 
+                        bd=0)
+    cam_canvas.place(x=33, y=45)
+
+    # --- Conditional Camera Setup ---
+    if USE_PICAMERA2:
+        print("Using Picamera2 (Raspberry Pi Camera)")
+        picam = Picamera2()
+        preview_config = picam.create_preview_configuration(main={"size": (640, 480)})
+        picam.configure(preview_config)
+        picam.start()
+
+        def update_frame():
+            frame = picam.capture_array()
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_resized = cv2.resize(frame_rgb, (320, 200))
+            img = Image.fromarray(frame_resized)
+            imgtk = ImageTk.PhotoImage(image=img)
+            cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
+            cam_canvas.image = imgtk
+            window.after(10, update_frame)
+
+        def capture_image():
+            frame = picam.capture_array()
+            filename = f"Data Detection Captures/capture_{time.strftime('%Y%m%d-%H%M%S')}.jpg"
+            cv2.imwrite(filename, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+            messagebox.showinfo("Captured", f"Image saved as {filename}")
+
+        def stop_camera():
+            picam.stop()
+
+    else:
+        print("Using OpenCV VideoCapture (Webcam)")
+        vid = cv2.VideoCapture(0)
+
+        def update_frame():
+            ret, frame = vid.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_resized = cv2.resize(frame_rgb, (320, 200))
+                img = Image.fromarray(frame_resized)
+                imgtk = ImageTk.PhotoImage(image=img)
+                cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
+                cam_canvas.image = imgtk
+            window.after(10, update_frame)
+
+        def capture_image():
+            ret, frame = vid.read()
+            if ret:
+                filename = f"Data Detection Captures/capture_{time.strftime('%Y%m%d-%H%M%S')}.jpg"
+                cv2.imwrite(filename, frame)
+                messagebox.showinfo("Captured", f"Image saved as {filename}")
+
+        def stop_camera():
+            vid.release()
+
+    # --- Circular Capture Button ---
+    capture_btn = Button(
+        window,
+        text="📸",
+        font=("Arial", 20, "bold"),
+        bg="#6B67D2",
+        fg="white",
+        activebackground="#8A86FF",
+        relief="solid",
+        bd=0,
+        command=capture_image,
+    )
+    capture_btn.place(x=167, y=250, width=45, height=45)
+    capture_btn.configure(cursor="hand2")
+
+    # --- Menu Button ---
+    menu_img = PhotoImage(file=relative_to_assets("menu_1.png"))
+    menu_hover = PhotoImage(file=relative_to_assets("menu_2.png"))
+
+    def back_to_main():
+        stop_camera()
+        switch_page("main")
+
+    create_button(menu_img, menu_hover, 270, 260, 85, 35, back_to_main)
+
+    update_frame()
+
+     
 # APP START #
 switch_page("main")
 window.mainloop()
