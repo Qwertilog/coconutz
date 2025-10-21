@@ -7,11 +7,19 @@ import sys
 import os
 import time
 import platform
+import threading
+import pickle
 from PIL import Image, ImageTk
 
 video_capture = None   
 picam = None          
 camera_after = None
+
+selected_file = None
+selected_label = None
+
+processed_file = None
+hsv_class = None
 
 USE_PICAMERA2 = False
 
@@ -49,9 +57,6 @@ def stop_camera():
         picam = None
 
 
-selected_file = None
-selected_label = None
-
 if getattr(sys, 'frozen', False):  # Running as EXE
     base_dir = Path(sys.executable).parent
 else:  # Running as script
@@ -82,6 +87,7 @@ def switch_page(page_name):
         "data_collection4": load_data_collection_page_4,
         "data_detection1": load_data_detection_page_1,
         "data_detection2": load_data_detection_page_2,
+        "data_detection3": load_data_detection_page_3,
     }
 
     if page_name in pages:
@@ -129,15 +135,41 @@ def create_text(content, x, y, w, h, font_size=24):
     txt.place(x=x, y=y, width=w, height=h)
     return txt
 
-def extract_hsv_features(image_path):
-    img = cv2.imread(image_path)
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+def camera_prepro(image_path):
+    def task():
+        global processed_file, hsv_class
 
+        try:
+            img = cv2.imread(image_path)
+            if img is None:
+                raise ValueError("Unreadable image")
+            
+            hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            lower=np.array([5, 30, 30])
+            upper=np.array([90, 255, 255])
+
+            mask=cv2.inRange(hsv, lower, upper)
+            kernel=np.ones((3, 3), np.uint8)
+            mask=cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask=cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            masked_img=cv2.bitwise_and(img, img, mask=mask)
+            resized_img=cv2.resize(masked_img, (224, 224))
+
+            processed_file=os.path.splitext(image_path)[0] + "_processed.jpg"
+            cv2.imwrite(processed_file, resized_img)
+            
+        except Exception as e:
+            print(f"[ERROR] Preprocessing/classification failed: {e}")
+
+
+def camera_features(image_path):
     h_mean = np.mean(hsv[:, :, 0])
     s_mean = np.mean(hsv[:, :, 1])
     v_mean = np.mean(hsv[:, :, 2])
 
     return [h_mean, s_mean, v_mean]
+
 
 def save_features_to_csv(features, filepath, label):
     df = pd.DataFrame(
@@ -297,25 +329,23 @@ def load_data_collection_page_3():
 
     def confirm_yes():
         global selected_file, selected_label
-        if selected_file and selected_label:        # 1) Extract HSV (your original function expects an image path)
-            features = extract_hsv_features(selected_file)  # returns [h_mean, s_mean, v_mean]
+        if selected_file and selected_label:        
+            features = camera_features(selected_file)  
 
-        # 2) Save features to CSV (existing beh\
-        # save_features_to_csv(features, csv_path, selected_label)
+        save_features_to_csv(features, csv_path, selected_label)
 
-        # 3) Rename/move the captured image to include the label (so final images are labeled)
         try:
             src = Path(selected_file)
             # final filename: <label>_YYYYMMDD-HHMMSS.jpg
             timestamp = time.strftime('%Y%m%d-%H%M%S')
             dst_name = f"{selected_label}_{timestamp}{src.suffix}"
             dst_path = folder_path1 / dst_name
-            src.replace(dst_path)  # atomic move/rename; overwrites only if same name exists
-            # update selected_file to the new path if needed downstream
+            src.replace(dst_path)  
             selected_file = str(dst_path)
         except Exception as e:
-            # if move fails, just continue but notify
             print("Warning: could not rename/move image:", e)
+
+        camera_prepro(selected_file)
 
         switch_page("data_collection4")
 
@@ -462,8 +492,14 @@ def load_data_detection_page_2():
     again=btn("Try Again", 70, 270, 100, 26, lambda: switch_page("data_detection1"))
     btn_hover(again)
 
-    next=btn("Proceed", 220, 270, 100, 26, lambda: switch_page("main"))
+    next=btn("Proceed", 220, 270, 100, 26, lambda: switch_page("data_detection3"))
     btn_hover(next)
+
+def load_data_detection_page_3(): # Solenoid and Audio Capture"
+    create_text("This is a placeholder for\nSolenoid and Audio Capture.", 33, 80, 321, 100, 18)
+
+    mm_btn=btn("Main Menu", 133, 220, 121, 53, lambda: switch_page("main"))
+    btn_hover(mm_btn)
 
 # APP START #
 switch_page("main")
