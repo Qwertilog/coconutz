@@ -8,7 +8,7 @@ import os
 import time
 import platform
 import threading
-import pickle
+from joblib import load
 from PIL import Image, ImageTk
 
 video_capture = None   
@@ -22,6 +22,12 @@ processed_file = None
 hsv_class = None
 
 USE_PICAMERA2 = False
+
+try:
+    model =load("camera_model.pkl")
+except Exception as e:
+    print(f"[WARN] Model not loaded: {e}")
+    model = None
 
 try: 
     from picamera2 import PiCamera
@@ -88,6 +94,8 @@ def switch_page(page_name):
         "data_detection1": load_data_detection_page_1,
         "data_detection2": load_data_detection_page_2,
         "data_detection3": load_data_detection_page_3,
+        "data_detection4": load_data_detection_page_4,
+        "data_detection5": load_data_detection_page_5
     }
 
     if page_name in pages:
@@ -95,11 +103,11 @@ def switch_page(page_name):
 
 
 # UI HELP #
-def btn(text, x, y, w,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  h, command):
+def btn(text, x, y, w, h, font_size, command):
     btn = Button(
      window,
      text=text,
-     font=("InriaSans Regular", 14),
+     font=("InriaSans Regular", font_size),
      fg="white",
      bg="#C82333",
      activebackground="#A71D2A",
@@ -158,12 +166,31 @@ def camera_prepro(image_path):
 
             processed_file=os.path.splitext(image_path)[0] + "_processed.jpg"
             cv2.imwrite(processed_file, resized_img)
-            
+
+            features= camera_features(processed_file)
+
+            if model is not None:
+                try:
+                    x = np.array([features])
+                    probs = model.predict_proba(x)[0]
+                    class_labels = model.classes_
+                    hsv_class ={class_labels[i]: float(probs[i]) for i in range(len(class_labels))}
+
+                except Exception:
+                    hsv_class = None
+
+            else:
+                print("[INFO] No model — only preprocessing done.")
+
         except Exception as e:
             print(f"[ERROR] Preprocessing/classification failed: {e}")
 
+    threading.Thread(target=task).start()
 
 def camera_features(image_path):
+    img=cv2.imread(image_path)
+    hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
     h_mean = np.mean(hsv[:, :, 0])
     s_mean = np.mean(hsv[:, :, 1])
     v_mean = np.mean(hsv[:, :, 2])
@@ -199,10 +226,10 @@ canvas.place(x=0, y=0)
 def load_main_page():
     create_text("COCONUTZ\nCoconut Type Classifier", 37, 37, 313, 61, 24)
 
-    dc_btn=btn("Data Collection", 77, 131, 233, 46, lambda: switch_page("data_collection1"))
+    dc_btn=btn("Data Collection", 77, 131, 233, 46, 14, lambda: switch_page("data_collection1"))
     btn_hover(dc_btn)
 
-    dt_btn=btn("Data Detection", 77, 219, 233, 46, lambda: switch_page("data_detection1"))
+    dt_btn=btn("Data Detection", 77, 219, 233, 46, 14, lambda: switch_page("data_detection1"))
     btn_hover(dt_btn)
     
 def load_data_collection_page_1():
@@ -304,7 +331,7 @@ def load_data_collection_page_1():
 
         update_frame_cam()
 
-    capture_btn=btn("Feature Extraction", 110, 260, 160, 27, capture_and_next)
+    capture_btn=btn("Feature Extraction", 110, 260, 160, 27, 14, capture_and_next)
     btn_hover(capture_btn)
 
 def load_data_collection_page_2():
@@ -315,13 +342,13 @@ def load_data_collection_page_2():
         selected_label = label
         switch_page("data_collection3")
 
-    malakanin_btn=btn("Malakanin", 77, 92, 233, 46, lambda: set_label_and_next("malakanin"))
+    malakanin_btn=btn("Malakanin", 77, 92, 233, 46, 14, lambda: set_label_and_next("malakanin"))
     btn_hover(malakanin_btn)
 
-    malauhog_btn=btn("Malauhog", 77, 163, 233, 46, lambda: set_label_and_next("malauhog"))
+    malauhog_btn=btn("Malauhog", 77, 163, 233, 46, 14, lambda: set_label_and_next("malauhog"))
     btn_hover(malauhog_btn)
 
-    malakatad_btn=btn("Malakatad", 77, 234, 233, 46, lambda: set_label_and_next("malakatad"))
+    malakatad_btn=btn("Malakatad", 77, 234, 233, 46, 14, lambda: set_label_and_next("malakatad"))
     btn_hover(malakatad_btn)
 
 def load_data_collection_page_3():
@@ -350,24 +377,24 @@ def load_data_collection_page_3():
         switch_page("data_collection4")
 
 
-    yes=btn("Yes", 53, 173, 121, 53, confirm_yes)
+    yes=btn("Yes", 53, 173, 121, 53, 14, confirm_yes)
     btn_hover(yes)
-    no=btn("No", 206, 173, 121, 53, lambda: switch_page("data_collection2"))
+    no=btn("No", 206, 173, 121, 53, 14, lambda: switch_page("data_collection2"))
     btn_hover(no)
 
 def load_data_collection_page_4():
     create_text("Would you like to\ncollect more data?", 33, 50, 321, 96, 30)
 
-    yes=btn("Yes", 62, 169, 121, 53, lambda: switch_page("data_collection1"))
+    yes=btn("Yes", 62, 169, 121, 53, 14, lambda: switch_page("data_collection1"))
     btn_hover(yes)
 
-    mm_btn=btn("Main Menu", 218, 169, 121, 53, lambda: switch_page("main"))
+    mm_btn=btn("Main Menu", 218, 169, 121, 53, 14, lambda: switch_page("main"))
     btn_hover(mm_btn)
 
 # --- CAMERA PAGE INTEGRATED HERE ---
 def load_data_detection_page_1():
     global video_capture, picam, camera_after, selected_file
-    create_text("Data Collection (Camera)", 37, 10, 313, 40, 20)
+    create_text("Image Capture", 37, 10, 313, 40, 20)
     cam_canvas = Canvas(window, width=320, height=200, bg="#5A56C8",
                         highlightthickness=0, bd=0)
     cam_canvas.place(x=33, y=45)
@@ -464,7 +491,7 @@ def load_data_detection_page_1():
 
         update_frame_cam()
 
-    capture_btn=btn("Feature Extraction", 110, 260, 160, 27, capture_and_next)
+    capture_btn=btn("Feature Extraction", 110, 260, 160, 27, 14, capture_and_next)
     btn_hover(capture_btn)
 
 def load_data_detection_page_2():
@@ -489,17 +516,107 @@ def load_data_detection_page_2():
     except Exception as e:
         create_text("Error loading image!", 37, 60, 313, 200, 16)
 
-    again=btn("Try Again", 70, 270, 100, 26, lambda: switch_page("data_detection1"))
+    again=btn("Try Again", 70, 270, 100, 26, 14, lambda: switch_page("data_detection1"))
     btn_hover(again)
 
-    next=btn("Proceed", 220, 270, 100, 26, lambda: switch_page("data_detection3"))
+    def on_proceed():
+        if selected_file and os.path.exists(selected_file):
+            camera_prepro(selected_file)
+            switch_page("data_detection3")
+
+    next=btn("Proceed", 220, 270, 100, 26, 14, lambda: switch_page("data_detection3"))
     btn_hover(next)
 
-def load_data_detection_page_3(): # Solenoid and Audio Capture"
-    create_text("This is a placeholder for\nSolenoid and Audio Capture.", 33, 80, 321, 100, 18)
+def load_data_detection_page_3(): # So
+    
 
-    mm_btn=btn("Main Menu", 133, 220, 121, 53, lambda: switch_page("main"))
-    btn_hover(mm_btn)
+    def camera_class():
+        global hsv_class
+        if hsv_class is not None:
+            switch_page("data_detection4")
+
+        else:
+            window.after(500, camera_class)
+    
+    def processing():
+        if selected_file:
+            camera_prepro(selected_file)
+            camera_class()
+
+    create_text("Processing Image...", 50, 100, 300, 100, 16)
+    processing()
+
+
+
+# SOLENOID AND AUDIO #
+def load_data_detection_page_4():
+    create_text("Audio Data Capture", 33, 80, 321, 100, 20)
+
+    next=btn("Activate Solenoid", 115, 220, 154, 53, lambda: switch_page("data_detection5"))
+    btn_hover(next)
+
+
+def load_data_detection_page_5():
+    global selected_file, hsv_class
+
+    # Placeholder for Data for Audio #
+    audio_class = {
+        "malakanin": 0.0,
+        "malauhog": 0.0,
+        "malakatad": 0.0
+    }
+
+    create_text("Fuzzy Logic Summary", 37, 10, 313, 40, 20)
+
+    if selected_file and os.path.exists(selected_file):
+        try:
+            img = Image.open(selected_file)
+            img = img.resize((120, 90), Image.LANCZOS)
+            imgtk = ImageTk.PhotoImage(image=img)
+            canvas_img = Canvas(window, width=120, height=90, bg="#5A56C8",
+                                highlightthickness=0, bd=0)
+            canvas_img.place(x=30, y=70)
+            canvas_img.create_image(0, 0, image=imgtk, anchor="nw")
+            canvas_img.image = imgtk
+        except Exception as e:
+            print("Error loading image:", e)
+    else:
+        create_text("No image available.", 37, 80, 313, 40, 14)
+
+    if hsv_class:
+        final_class = max(hsv_class, key=hsv_class.get)
+    else:
+        final_class = "N/A"
+
+    create_text(f"Final Class: {final_class}", 37, 170, 313, 30, 18)
+
+    create_text("Camera Classification", 50, 210, 160, 25, 13)
+    create_text("Audio Classification", 220, 210, 160, 25, 13)
+
+    y_start = 235
+    spacing = 25
+
+    classes = ["malakanin", "malauhog", "malakatad"]
+    for i, cls in enumerate(classes):
+        cam_val = hsv_class.get(cls, 0.0) if hsv_class else 0.0
+        aud_val = audio_class.get(cls, 0.0)
+        create_text(f"{cls}: {cam_val:.2f}", 50, y_start + i * spacing, 160, 20, 12)
+        create_text(f"{cls}: {aud_val:.2f}", 220, y_start + i * spacing, 160, 20, 12)
+
+    data_cap_dir = Path("Data Detection Captures")
+    data_cap_dir.mkdir(exist_ok=True)
+    save_path = data_cap_dir / f"{Path(selected_file).stem}_{final_class}.jpg"
+    try:
+        import shutil
+        shutil.copy(selected_file, save_path)
+        print(f"[INFO] Saved classified image as: {save_path}")
+    except Exception as e:
+        print(f"[WARN] Failed to save classified image: {e}")
+
+
+    back = btn("Back to Main", 250, 270, 150, 26, 14, lambda: switch_page("main"))
+    btn_hover(back)
+
 
 # APP START #
 switch_page("main")
