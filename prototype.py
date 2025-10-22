@@ -128,14 +128,14 @@ def btn_hover(button, normal="#C82333", hover="#E74C3C"):
     button.bind("<Enter>", on_enter)
     button.bind("<Leave>", on_leave)
 
-def create_text(content, x, y, w, h, font_size=24):
+def create_text(content, x, y, w, h, font_size, style):
     txt = Text(
         window,
         bd=0,
         bg="#7571E6",
         fg="#FFFFFF",
         highlightthickness=0,
-        font=("InriaSans Regular", font_size * -1),
+        font=("InriaSans Regular", font_size, style),
     )
     txt.insert("1.0", content)
     txt.tag_configure("center", justify="center")
@@ -207,7 +207,7 @@ def save_features_to_csv(features, filepath, label):
 
 # MAIN WINDOW #
 window = Tk()
-window.geometry("387x308")
+window.geometry("800x420")
 window.configure(bg="#7571E6")
 window.resizable(False, False)
 
@@ -224,21 +224,21 @@ canvas.place(x=0, y=0)
 
 # PAGES #
 def load_main_page():
-    create_text("COCONUTZ\nCoconut Type Classifier", 37, 37, 313, 61, 24)
+    create_text("COCONUTZ\nCoconut Type Classifier", 45, 60, 700, 150, 45, "bold")
 
-    dc_btn=btn("Data Collection", 77, 131, 233, 46, 14, lambda: switch_page("data_collection1"))
+    dc_btn=btn("Data Collection", 180, 240, 450, 46, 18, lambda: switch_page("data_collection1"))
     btn_hover(dc_btn)
 
-    dt_btn=btn("Data Detection", 77, 219, 233, 46, 14, lambda: switch_page("data_detection1"))
+    dt_btn=btn("Data Detection", 180, 315, 450, 46, 18, lambda: switch_page("data_detection1"))
     btn_hover(dt_btn)
     
 def load_data_collection_page_1():
     global video_capture, picam, camera_after, selected_file
-    create_text("Data Collection (Camera)", 37, 10, 313, 40, 20)
+    create_text("Data Collection (Camera)", 195, 20, 400, 300, 24, "bold")
 
-    cam_canvas = Canvas(window, width=320, height=200, bg="#5A56C8",
+    cam_canvas = Canvas(window, width=560, height=280, bg="#5A56C8",
                         highlightthickness=0, bd=0)
-    cam_canvas.place(x=33, y=45)
+    cam_canvas.place(x=120, y=70)
 
     selected_file = None
 
@@ -257,7 +257,7 @@ def load_data_collection_page_1():
             try:
                 frame = picam.capture_array()
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_resized = cv2.resize(frame_rgb, (320, 200))
+                frame_resized = cv2.resize(frame_rgb, (560, 280))
                 img = Image.fromarray(frame_resized)
                 imgtk = ImageTk.PhotoImage(image=img)
                 # try drawing; if canvas removed, exception will be caught
@@ -267,7 +267,7 @@ def load_data_collection_page_1():
                 # canvas likely destroyed or camera stopped; stop loop
                 stop_camera()
                 return
-            camera_after = window.after(10, update_frame_picamera)
+            camera_after = window.after(10, update_frame_picam)
         
         def capture_and_next():
             try:
@@ -297,7 +297,7 @@ def load_data_collection_page_1():
                 ret, frame = video_capture.read()
                 if ret:
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame_resized = cv2.resize(frame_rgb, (320, 200))
+                    frame_resized = cv2.resize(frame_rgb, (560, 280))
                     img = Image.fromarray(frame_resized)
                     imgtk = ImageTk.PhotoImage(image=img)
                     cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
@@ -331,28 +331,28 @@ def load_data_collection_page_1():
 
         update_frame_cam()
 
-    capture_btn=btn("Feature Extraction", 110, 260, 160, 27, 14, capture_and_next)
+    capture_btn=btn("Feature Extraction", 280, 360, 215, 35, 18, capture_and_next)
     btn_hover(capture_btn)
 
 def load_data_collection_page_2():
-    create_text("What is the classification of the\nCoconut?", 37, 19, 313, 50, 22)
+    create_text("What is the classification of the\nCoconut?", 155, 50, 500, 400, 24, "bold")
 
     def set_label_and_next(label):
         global selected_label
         selected_label = label
         switch_page("data_collection3")
 
-    malakanin_btn=btn("Malakanin", 77, 92, 233, 46, 14, lambda: set_label_and_next("malakanin"))
+    malakanin_btn=btn("Malakanin", 200, 160, 400, 46, 20, lambda: set_label_and_next("malakanin"))
     btn_hover(malakanin_btn)
 
-    malauhog_btn=btn("Malauhog", 77, 163, 233, 46, 14, lambda: set_label_and_next("malauhog"))
+    malauhog_btn=btn("Malauhog", 200, 240, 400, 46, 20, lambda: set_label_and_next("malauhog"))
     btn_hover(malauhog_btn)
 
-    malakatad_btn=btn("Malakatad", 77, 234, 233, 46, 14, lambda: set_label_and_next("malakatad"))
+    malakatad_btn=btn("Malakatad", 200, 320, 400, 46, 20, lambda: set_label_and_next("malakatad"))
     btn_hover(malakatad_btn)
 
 def load_data_collection_page_3():
-    create_text("Are you sure this is\nthe right classification?", 35, 50, 321, 96, 30)
+    create_text("Are you sure this is\nthe right classification?", 75, 75, 650, 400, 42, "bold")
 
     def confirm_yes():
         global selected_file, selected_label
@@ -377,27 +377,28 @@ def load_data_collection_page_3():
         switch_page("data_collection4")
 
 
-    yes=btn("Yes", 53, 173, 121, 53, 14, confirm_yes)
+    yes=btn("Yes", 225, 250, 150, 80, 18, confirm_yes)
     btn_hover(yes)
-    no=btn("No", 206, 173, 121, 53, 14, lambda: switch_page("data_collection2"))
+    no=btn("No", 450, 250, 150, 80, 18, lambda: switch_page("data_collection2"))
     btn_hover(no)
 
 def load_data_collection_page_4():
-    create_text("Would you like to\ncollect more data?", 33, 50, 321, 96, 30)
+    create_text("Would you like to\ncollect more data?", 75, 50, 640, 400, 48, "bold")
 
-    yes=btn("Yes", 62, 169, 121, 53, 14, lambda: switch_page("data_collection1"))
+    yes=btn("Yes", 215, 250, 150, 80, 18, lambda: switch_page("data_collection1"))
     btn_hover(yes)
 
-    mm_btn=btn("Main Menu", 218, 169, 121, 53, 14, lambda: switch_page("main"))
+    mm_btn=btn("Main Menu", 435, 250, 150, 80, 18, lambda: switch_page("main"))
     btn_hover(mm_btn)
 
-# --- CAMERA PAGE INTEGRATED HERE ---
+
 def load_data_detection_page_1():
     global video_capture, picam, camera_after, selected_file
-    create_text("Image Capture", 37, 10, 313, 40, 20)
-    cam_canvas = Canvas(window, width=320, height=200, bg="#5A56C8",
+    create_text("Image Capture", 200, 15, 400, 300, 32, "bold")
+    cam_canvas = Canvas(window, width=560, height=280, bg="#5A56C8",
                         highlightthickness=0, bd=0)
-    cam_canvas.place(x=33, y=45)
+    cam_canvas.place(x=120, y=70)
+
 
     # ensure selected_file cleared on entry
     selected_file = None
@@ -417,7 +418,7 @@ def load_data_detection_page_1():
             try:
                 frame = picam.capture_array()
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_resized = cv2.resize(frame_rgb, (320, 200))
+                frame_resized = cv2.resize(frame_rgb, (560, 280))
                 img = Image.fromarray(frame_resized)
                 imgtk = ImageTk.PhotoImage(image=img)
                 # try drawing; if canvas removed, exception will be caught
@@ -427,7 +428,7 @@ def load_data_detection_page_1():
                 # canvas likely destroyed or camera stopped; stop loop
                 stop_camera()
                 return
-            camera_after = window.after(10, update_frame_picamera)
+            camera_after = window.after(10, update_frame_picam)
         
         def capture_and_next():
             try:
@@ -457,7 +458,7 @@ def load_data_detection_page_1():
                 ret, frame = video_capture.read()
                 if ret:
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame_resized = cv2.resize(frame_rgb, (320, 200))
+                    frame_resized = cv2.resize(frame_rgb, (560, 280))
                     img = Image.fromarray(frame_resized)
                     imgtk = ImageTk.PhotoImage(image=img)
                     cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
@@ -491,32 +492,32 @@ def load_data_detection_page_1():
 
         update_frame_cam()
 
-    capture_btn=btn("Feature Extraction", 110, 260, 160, 27, 14, capture_and_next)
+    capture_btn=btn("Feature Extraction", 280, 360, 215, 35, 18, capture_and_next)
     btn_hover(capture_btn)
 
 def load_data_detection_page_2():
     global selected_file
 
-    create_text("Captured Image", 37, 10, 313, 40, 20)
+    create_text("Captured Image", 200, 15, 400, 300, 32, "bold")
 
     if not selected_file or not os.path.exists(selected_file):
         create_text("No image captured!", 37, 60, 313, 200, 16)
     
     try: 
         img=Image.open(selected_file) 
-        img= img.resize((320, 200), Image.LANCZOS)
+        img= img.resize((560, 280), Image.LANCZOS)
         imgtk=ImageTk.PhotoImage(image=img)
 
-        canvas=Canvas(window, width=320, height=200, bg="#5A56C8",
+        cam_canvas = Canvas(window, width=560, height=280, bg="#5A56C8",
                         highlightthickness=0, bd=0)
-        canvas.place(x=33, y=45)
-        canvas.create_image(0, 0, image=imgtk, anchor="nw")
-        canvas.image=imgtk
+        cam_canvas.place(x=120, y=70)
+        cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
+        cam_canvas.image=imgtk
 
     except Exception as e:
         create_text("Error loading image!", 37, 60, 313, 200, 16)
 
-    again=btn("Try Again", 70, 270, 100, 26, 14, lambda: switch_page("data_detection1"))
+    again=btn("Try Again", 160, 360, 215, 35, 18, lambda: switch_page("data_detection1"))
     btn_hover(again)
 
     def on_proceed():
@@ -524,10 +525,10 @@ def load_data_detection_page_2():
             camera_prepro(selected_file)
             switch_page("data_detection3")
 
-    next=btn("Proceed", 220, 270, 100, 26, 14, lambda: switch_page("data_detection3"))
+    next=btn("Proceed", 425, 360, 215, 35, 18, lambda: switch_page("data_detection3"))
     btn_hover(next)
 
-def load_data_detection_page_3(): # So
+def load_data_detection_page_3():
     
 
     def camera_class():
@@ -543,65 +544,63 @@ def load_data_detection_page_3(): # So
             camera_prepro(selected_file)
             camera_class()
 
-    create_text("Processing Image...", 50, 100, 300, 100, 16)
+    create_text("Processing Image...", 250, 200, 300, 100, 18, "normal")
     processing()
 
 
 
-# SOLENOID AND AUDIO #
 def load_data_detection_page_4():
-    create_text("Audio Data Capture", 33, 80, 321, 100, 20)
+    create_text("Audio Data Capture", 50, 125, 700, 100, 48, "bold")
 
-    next=btn("Activate Solenoid", 115, 220, 154, 53, lambda: switch_page("data_detection5"))
+    next=btn("Activate Solenoid", 290, 220, 210, 65, 18, lambda: switch_page("data_detection5"))
     btn_hover(next)
 
 
 def load_data_detection_page_5():
     global selected_file, hsv_class
 
-    # Placeholder for Data for Audio #
     audio_class = {
         "malakanin": 0.0,
         "malauhog": 0.0,
         "malakatad": 0.0
     }
 
-    create_text("Fuzzy Logic Summary", 37, 10, 313, 40, 20)
+    create_text("Classification Summary", 160, 30, 500, 40, 24, "bold")
 
     if selected_file and os.path.exists(selected_file):
         try:
             img = Image.open(selected_file)
-            img = img.resize((120, 90), Image.LANCZOS)
+            img = img.resize((320, 240), Image.LANCZOS)
             imgtk = ImageTk.PhotoImage(image=img)
-            canvas_img = Canvas(window, width=120, height=90, bg="#5A56C8",
+            canvas_img = Canvas(window, width=320, height=240, bg="#5A56C8",
                                 highlightthickness=0, bd=0)
-            canvas_img.place(x=30, y=70)
+            canvas_img.place(x=50, y=100)
             canvas_img.create_image(0, 0, image=imgtk, anchor="nw")
             canvas_img.image = imgtk
         except Exception as e:
             print("Error loading image:", e)
     else:
-        create_text("No image available.", 37, 80, 313, 40, 14)
+        create_text("No image available.", 37, 80, 313, 40, 14, "normal")
 
     if hsv_class:
         final_class = max(hsv_class, key=hsv_class.get)
     else:
         final_class = "N/A"
 
-    create_text(f"Final Class: {final_class}", 37, 170, 313, 30, 18)
+    create_text(f"Final Class: {final_class}", 410, 120, 313, 30, 18, "bold")
 
-    create_text("Camera Classification", 50, 210, 160, 25, 13)
-    create_text("Audio Classification", 220, 210, 160, 25, 13)
+    create_text("Camera Classification", 370, 180, 210, 200, 14, "bold")
+    create_text("Audio Classification", 580, 180, 200, 200, 14, "bold")
 
-    y_start = 235
+    y_start = 205
     spacing = 25
 
     classes = ["malakanin", "malauhog", "malakatad"]
     for i, cls in enumerate(classes):
         cam_val = hsv_class.get(cls, 0.0) if hsv_class else 0.0
         aud_val = audio_class.get(cls, 0.0)
-        create_text(f"{cls}: {cam_val:.2f}", 50, y_start + i * spacing, 160, 20, 12)
-        create_text(f"{cls}: {aud_val:.2f}", 220, y_start + i * spacing, 160, 20, 12)
+        create_text(f"{cls}: {cam_val:.2f}", 410, y_start + i * spacing, 160, 20, 12, "normal")
+        create_text(f"{cls}: {aud_val:.2f}", 600, y_start + i * spacing, 160, 20, 12, "normal")
 
     data_cap_dir = Path("Data Detection Captures")
     data_cap_dir.mkdir(exist_ok=True)
@@ -614,7 +613,7 @@ def load_data_detection_page_5():
         print(f"[WARN] Failed to save classified image: {e}")
 
 
-    back = btn("Back to Main", 250, 270, 150, 26, 14, lambda: switch_page("main"))
+    back = btn("Back to Main", 620, 345, 150, 65, 18, lambda: switch_page("main"))
     btn_hover(back)
 
 
