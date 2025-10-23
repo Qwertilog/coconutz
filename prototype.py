@@ -486,3 +486,4 @@ def load_data_detection_page_5():
 # APP START #
 switch_page("main")
 window.mainloop()
+#test#
