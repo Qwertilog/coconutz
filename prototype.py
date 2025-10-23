@@ -8,35 +8,38 @@ import os
 import time
 import platform
 import threading
+import subprocess
 from joblib import load
 from PIL import Image, ImageTk
 
-video_capture = None   
-picam = None          
+video_capture = None
+rpicam_proc = None
 camera_after = None
 
 selected_file = None
 selected_label = None
-
 processed_file = None
 hsv_class = None
 
-USE_PICAMERA2 = False
+USE_RPICAM = False
 
+# --- Try to detect RPiCam stack availability ---
 try:
-    model =load("camera_model.pkl")
+    subprocess.run(["rpicam-hello", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    USE_RPICAM = True
+except Exception:
+    USE_RPICAM = False
+
+# --- Load model if available ---
+try:
+    model = load("camera_model.pkl")
 except Exception as e:
     print(f"[WARN] Model not loaded: {e}")
     model = None
 
-try: 
-    from picamera2 import PiCamera
-    USE_PICAMERA2 = True
-except ImportError:
-    USE_PICAMERA2 = False
 
 def stop_camera():
-    global video_capture, picam, camera_after
+    global video_capture, rpicam_proc, camera_after
     try:
         if camera_after is not None:
             window.after_cancel(camera_after)
@@ -45,35 +48,31 @@ def stop_camera():
     camera_after = None
 
     try:
-        if video_capture is not None:
-            if hasattr(video_capture, "isOpened") and video_capture.isOpened():
-                video_capture.release()
-            video_capture = None
+        if video_capture is not None and hasattr(video_capture, "isOpened") and video_capture.isOpened():
+            video_capture.release()
+        video_capture = None
     except Exception:
         video_capture = None
 
     try:
-        if picam is not None:
-            try:
-                picam.stop()
-            except Exception:
-                pass
-            picam = None
+        if rpicam_proc is not None:
+            rpicam_proc.terminate()
+            rpicam_proc = None
     except Exception:
-        picam = None
+        rpicam_proc = None
 
 
 if getattr(sys, 'frozen', False):  # Running as EXE
     base_dir = Path(sys.executable).parent
-else:  # Running as script
+else:
     base_dir = Path(__file__).parent
 
 csv_path = base_dir / "coconut_features.csv"
-
 folder_path1 = base_dir / "Data Collection Captures"
 folder_path2 = base_dir / "Data Detection Captures"
 os.makedirs(folder_path1, exist_ok=True)
 os.makedirs(folder_path2, exist_ok=True)
+
 
 def switch_page(page_name):
     try:
@@ -104,29 +103,31 @@ def switch_page(page_name):
 
 # UI HELP #
 def btn(text, x, y, w, h, font_size, command):
-    btn = Button(
-     window,
-     text=text,
-     font=("InriaSans Regular", font_size),
-     fg="white",
-     bg="#C82333",
-     activebackground="#A71D2A",
-     activeforeground="white",
-     borderwidth=0,
-    highlightthickness=2,
-    highlightbackground="white",
-    highlightcolor="white",  
-     command=command, 
-     relief="flat"
-     )
-    btn.place(x=x, y=y, width=w, height=h)
-    return btn
+    b = Button(
+        window,
+        text=text,
+        font=("InriaSans Regular", font_size),
+        fg="white",
+        bg="#C82333",
+        activebackground="#A71D2A",
+        activeforeground="white",
+        borderwidth=0,
+        highlightthickness=2,
+        highlightbackground="white",
+        highlightcolor="white",
+        command=command,
+        relief="flat"
+    )
+    b.place(x=x, y=y, width=w, height=h)
+    return b
+
 
 def btn_hover(button, normal="#C82333", hover="#E74C3C"):
     def on_enter(e): button.config(bg=hover)
     def on_leave(e): button.config(bg=normal)
     button.bind("<Enter>", on_enter)
     button.bind("<Leave>", on_leave)
+
 
 def create_text(content, x, y, w, h, font_size, style):
     txt = Text(
@@ -143,67 +144,86 @@ def create_text(content, x, y, w, h, font_size, style):
     txt.place(x=x, y=y, width=w, height=h)
     return txt
 
+
+# --- Camera Processing --- #
+def get_rpicam_frame():
+    """Capture one frame from rpicam-vid using subprocess and return as numpy array."""
+    global rpicam_proc
+    cmd = [
+        "rpicam-vid",
+        "--nopreview",
+        "--timeout", "100",
+        "--width", "640",
+        "--height", "480",
+        "--output", "-",
+        "--codec", "mjpeg",
+        "--framerate", "30"
+    ]
+    rpicam_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    data = b''
+    try:
+        while True:
+            chunk = rpicam_proc.stdout.read(1024)
+            if not chunk:
+                break
+            data += chunk
+            # attempt decode
+            frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            if frame is not None:
+                rpicam_proc.terminate()
+                return frame
+    except Exception:
+        if rpicam_proc:
+            rpicam_proc.terminate()
+        return None
+    return None
+
+
 def camera_prepro(image_path):
     def task():
         global processed_file, hsv_class
-
         try:
             img = cv2.imread(image_path)
             if img is None:
                 raise ValueError("Unreadable image")
-            
-            hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            lower=np.array([5, 30, 30])
-            upper=np.array([90, 255, 255])
-
-            mask=cv2.inRange(hsv, lower, upper)
-            kernel=np.ones((3, 3), np.uint8)
-            mask=cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-            mask=cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-            masked_img=cv2.bitwise_and(img, img, mask=mask)
-            resized_img=cv2.resize(masked_img, (224, 224))
-
-            processed_file=os.path.splitext(image_path)[0] + "_processed.jpg"
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            lower = np.array([5, 30, 30])
+            upper = np.array([90, 255, 255])
+            mask = cv2.inRange(hsv, lower, upper)
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            masked_img = cv2.bitwise_and(img, img, mask=mask)
+            resized_img = cv2.resize(masked_img, (224, 224))
+            processed_file = os.path.splitext(image_path)[0] + "_processed.jpg"
             cv2.imwrite(processed_file, resized_img)
-
-            features= camera_features(processed_file)
-
+            features = camera_features(processed_file)
             if model is not None:
-                try:
-                    x = np.array([features])
-                    probs = model.predict_proba(x)[0]
-                    class_labels = model.classes_
-                    hsv_class ={class_labels[i]: float(probs[i]) for i in range(len(class_labels))}
-
-                except Exception:
-                    hsv_class = None
-
+                x = np.array([features])
+                probs = model.predict_proba(x)[0]
+                class_labels = model.classes_
+                hsv_class = {class_labels[i]: float(probs[i]) for i in range(len(class_labels))}
             else:
                 print("[INFO] No model — only preprocessing done.")
-
         except Exception as e:
             print(f"[ERROR] Preprocessing/classification failed: {e}")
 
     threading.Thread(target=task).start()
 
-def camera_features(image_path):
-    img=cv2.imread(image_path)
-    hsv=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
+def camera_features(image_path):
+    img = cv2.imread(image_path)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     h_mean = np.mean(hsv[:, :, 0])
     s_mean = np.mean(hsv[:, :, 1])
     v_mean = np.mean(hsv[:, :, 2])
-
     return [h_mean, s_mean, v_mean]
 
 
 def save_features_to_csv(features, filepath, label):
-    df = pd.DataFrame(
-        [[label] + features],
-        columns=["Label", "H_mean", "S_mean", "V_mean"]
-    )
+    df = pd.DataFrame([[label] + features], columns=["Label", "H_mean", "S_mean", "V_mean"])
     df.to_csv(filepath, mode="a", header=not Path(filepath).exists(), index=False)
+
 
 # MAIN WINDOW #
 window = Tk()
@@ -211,288 +231,64 @@ window.geometry("800x420")
 window.configure(bg="#7571E6")
 window.resizable(False, False)
 
-canvas = Canvas(
-    window,
-    bg="#7571E6",
-    height=308,
-    width=387,
-    bd=0,
-    highlightthickness=0,
-    relief="ridge",
-)
+canvas = Canvas(window, bg="#7571E6", height=308, width=387, bd=0, highlightthickness=0, relief="ridge")
 canvas.place(x=0, y=0)
 
-# PAGES #
+
+# --- MAIN PAGE --- #
 def load_main_page():
     create_text("COCONUTZ\nCoconut Type Classifier", 45, 60, 700, 150, 45, "bold")
-
-    dc_btn=btn("Data Collection", 180, 240, 450, 46, 18, lambda: switch_page("data_collection1"))
+    dc_btn = btn("Data Collection", 180, 240, 450, 46, 18, lambda: switch_page("data_collection1"))
     btn_hover(dc_btn)
-
-    dt_btn=btn("Data Detection", 180, 315, 450, 46, 18, lambda: switch_page("data_detection1"))
+    dt_btn = btn("Data Detection", 180, 315, 450, 46, 18, lambda: switch_page("data_detection1"))
     btn_hover(dt_btn)
-    
-def load_data_collection_page_1():
-    global video_capture, picam, camera_after, selected_file
-    create_text("Data Collection (Camera)", 195, 20, 400, 300, 24, "bold")
 
-    cam_canvas = Canvas(window, width=560, height=280, bg="#5A56C8",
-                        highlightthickness=0, bd=0)
-    cam_canvas.place(x=120, y=70)
 
-    selected_file = None
+# --- CAMERA PAGE FIX --- #
+def camera_stream(cam_canvas, folder_path, next_page):
+    global camera_after
 
-    stop_camera()
+    def update():
+        global camera_after
+        frame = get_rpicam_frame() if USE_RPICAM else (lambda cap=video_capture: cap.read()[1] if cap.isOpened() else None)()
+        if frame is not None:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_resized = cv2.resize(frame_rgb, (560, 280))
+            img = Image.fromarray(frame_resized)
+            imgtk = ImageTk.PhotoImage(image=img)
+            cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
+            cam_canvas.image = imgtk
+        camera_after = window.after(100, update)
 
-    # --- camera setup ---
-    if USE_PICAMERA2:
-        print("Using PiCamera2 (Raspberry Pi Camera)")
-        picam = PiCamera()
-        preview_config = picam.create_preview_configuration(main={"size": (640, 480)})
-        picam.configure(preview_config)
-        picam.start()
-
-        def update_frame_picam():
-            global camera_after_id
-            try:
-                frame = picam.capture_array()
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_resized = cv2.resize(frame_rgb, (560, 280))
-                img = Image.fromarray(frame_resized)
-                imgtk = ImageTk.PhotoImage(image=img)
-                # try drawing; if canvas removed, exception will be caught
-                cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
-                cam_canvas.image = imgtk
-            except Exception:
-                # canvas likely destroyed or camera stopped; stop loop
-                stop_camera()
-                return
-            camera_after = window.after(10, update_frame_picam)
-        
-        def capture_and_next():
-            try:
-                frame = picam.capture_array()
-                timestamp = time.strftime('%Y%m%d-%H%M%S')
-                tmp_name = f"tmp_capture_{timestamp}.jpg"
-                tmp_path = folder_path1 / tmp_name
-                # save as BGR for OpenCV compatibility
-                cv2.imwrite(str(tmp_path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-                selected_file = str(tmp_path)
-                stop_camera()
-                switch_page("data_collection2")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to Capture: {e}")
-        update_frame_picam()
-
-    else:
-        print("Using OpenCV VideoCapture (Webcam)")
-        global video_capture, camera_after
-        video_capture = cv2.VideoCapture(0)
-
-        def update_frame_cam():
-            global camera_after
-            try:
-                if video_capture is None:
-                    return
-                ret, frame = video_capture.read()
-                if ret:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame_resized = cv2.resize(frame_rgb, (560, 280))
-                    img = Image.fromarray(frame_resized)
-                    imgtk = ImageTk.PhotoImage(image=img)
-                    cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
-                    cam_canvas.image = imgtk
-                else:
-                    pass
-            except Exception:
-                stop_camera()
-                return
-            camera_after = window.after(10, update_frame_cam)
-
-        def capture_and_next():
-            global selected_file
-            try:
-                if video_capture is None:
-                    messagebox.showerror("Camera Error", "Camera not initialized.")
-                    return
-                ret, frame = video_capture.read()
-                if ret:
-                    timestamp = time.strftime('%Y%m%d-%H%M%S')
-                    tmp_name = f"tmp_capture_{timestamp}.jpg"
-                    tmp_path = folder_path1 / tmp_name
-                    cv2.imwrite(str(tmp_path), frame)
-                    selected_file = str(tmp_path)
-                    stop_camera()
-                    switch_page("data_collection2")
-                else:
-                    messagebox.showerror("Capture Error", "Failed to read frame from camera.")
-            except Exception as e:
-                messagebox.showerror("Capture Error", f"Failed to Capture: {e}")
-
-        update_frame_cam()
-
-    capture_btn=btn("Feature Extraction", 280, 360, 215, 35, 18, capture_and_next)
-    btn_hover(capture_btn)
-
-def load_data_collection_page_2():
-    create_text("What is the classification of the\nCoconut?", 155, 50, 500, 400, 24, "bold")
-
-    def set_label_and_next(label):
-        global selected_label
-        selected_label = label
-        switch_page("data_collection3")
-
-    malakanin_btn=btn("Malakanin", 200, 160, 400, 46, 20, lambda: set_label_and_next("malakanin"))
-    btn_hover(malakanin_btn)
-
-    malauhog_btn=btn("Malauhog", 200, 240, 400, 46, 20, lambda: set_label_and_next("malauhog"))
-    btn_hover(malauhog_btn)
-
-    malakatad_btn=btn("Malakatad", 200, 320, 400, 46, 20, lambda: set_label_and_next("malakatad"))
-    btn_hover(malakatad_btn)
-
-def load_data_collection_page_3():
-    create_text("Are you sure this is\nthe right classification?", 75, 75, 650, 400, 42, "bold")
-
-    def confirm_yes():
-        global selected_file, selected_label
-        if selected_file and selected_label:        
-            features = camera_features(selected_file)  
-
-        save_features_to_csv(features, csv_path, selected_label)
-
-        try:
-            src = Path(selected_file)
-            # final filename: <label>_YYYYMMDD-HHMMSS.jpg
+    def capture_and_next():
+        global selected_file
+        frame = get_rpicam_frame() if USE_RPICAM else (lambda cap=video_capture: cap.read()[1] if cap.isOpened() else None)()
+        if frame is not None:
             timestamp = time.strftime('%Y%m%d-%H%M%S')
-            dst_name = f"{selected_label}_{timestamp}{src.suffix}"
-            dst_path = folder_path1 / dst_name
-            src.replace(dst_path)  
-            selected_file = str(dst_path)
-        except Exception as e:
-            print("Warning: could not rename/move image:", e)
+            tmp_name = f"tmp_capture_{timestamp}.jpg"
+            tmp_path = folder_path / tmp_name
+            cv2.imwrite(str(tmp_path), frame)
+            selected_file = str(tmp_path)
+            stop_camera()
+            switch_page(next_page)
+        else:
+            messagebox.showerror("Capture Error", "Failed to capture frame.")
 
-        camera_prepro(selected_file)
-
-        switch_page("data_collection4")
-
-
-    yes=btn("Yes", 225, 250, 150, 80, 18, confirm_yes)
-    btn_hover(yes)
-    no=btn("No", 450, 250, 150, 80, 18, lambda: switch_page("data_collection2"))
-    btn_hover(no)
-
-def load_data_collection_page_4():
-    create_text("Would you like to\ncollect more data?", 75, 50, 640, 400, 48, "bold")
-
-    yes=btn("Yes", 215, 250, 150, 80, 18, lambda: switch_page("data_collection1"))
-    btn_hover(yes)
-
-    mm_btn=btn("Main Menu", 435, 250, 150, 80, 18, lambda: switch_page("main"))
-    btn_hover(mm_btn)
+    update()
+    return capture_and_next
 
 
-def load_data_detection_page_1():
-    global video_capture, picam, camera_after, selected_file
-    create_text("Image Capture", 200, 15, 400, 300, 32, "bold")
-    cam_canvas = Canvas(window, width=560, height=280, bg="#5A56C8",
-                        highlightthickness=0, bd=0)
+# --- Data Collection Page 1 --- #
+def load_data_collection_page_1():
+    global video_capture
+    create_text("Data Collection (Camera)", 195, 20, 400, 300, 24, "bold")
+    cam_canvas = Canvas(window, width=560, height=280, bg="#5A56C8", highlightthickness=0, bd=0)
     cam_canvas.place(x=120, y=70)
-
-
-    # ensure selected_file cleared on entry
-    selected_file = None
-
     stop_camera()
-
-    # --- camera setup ---
-    if USE_PICAMERA2:
-        print("Using PiCamera2 (Raspberry Pi Camera)")
-        picam = PiCamera()
-        preview_config = picam.create_preview_configuration(main={"size": (640, 480)})
-        picam.configure(preview_config)
-        picam.start()
-
-        def update_frame_picam():
-            global camera_after_id
-            try:
-                frame = picam.capture_array()
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_resized = cv2.resize(frame_rgb, (560, 280))
-                img = Image.fromarray(frame_resized)
-                imgtk = ImageTk.PhotoImage(image=img)
-                # try drawing; if canvas removed, exception will be caught
-                cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
-                cam_canvas.image = imgtk
-            except Exception:
-                # canvas likely destroyed or camera stopped; stop loop
-                stop_camera()
-                return
-            camera_after = window.after(10, update_frame_picam)
-        
-        def capture_and_next():
-            try:
-                frame = picam.capture_array()
-                timestamp = time.strftime('%Y%m%d-%H%M%S')
-                tmp_name = f"tmp_capture_{timestamp}.jpg"
-                tmp_path = folder_path1 / tmp_name
-                # save as BGR for OpenCV compatibility
-                cv2.imwrite(str(tmp_path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-                selected_file = str(tmp_path)
-                stop_camera()
-                switch_page("data_collection2")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to Capture: {e}")
-        update_frame_picam()
-
-    else:
-        print("Using OpenCV VideoCapture (Webcam)")
-        global video_capture, camera_after
+    if not USE_RPICAM:
         video_capture = cv2.VideoCapture(0)
-
-        def update_frame_cam():
-            global camera_after
-            try:
-                if video_capture is None:
-                    return
-                ret, frame = video_capture.read()
-                if ret:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame_resized = cv2.resize(frame_rgb, (560, 280))
-                    img = Image.fromarray(frame_resized)
-                    imgtk = ImageTk.PhotoImage(image=img)
-                    cam_canvas.create_image(0, 0, image=imgtk, anchor="nw")
-                    cam_canvas.image = imgtk
-                else:
-                    pass
-            except Exception:
-                stop_camera()
-                return
-            camera_after = window.after(10, update_frame_cam)
-
-        def capture_and_next():
-            global selected_file
-            try:
-                if video_capture is None:
-                    messagebox.showerror("Camera Error", "Camera not initialized.")
-                    return
-                ret, frame = video_capture.read()
-                if ret:
-                    timestamp = time.strftime('%Y%m%d-%H%M%S')
-                    tmp_name = f"tmp_capture_{timestamp}.jpg"
-                    tmp_path = folder_path1 / tmp_name
-                    cv2.imwrite(str(tmp_path), frame)
-                    selected_file = str(tmp_path)
-                    stop_camera()
-                    switch_page("data_detection2")
-                else:
-                    messagebox.showerror("Capture Error", "Failed to read frame from camera.")
-            except Exception as e:
-                messagebox.showerror("Capture Error", f"Failed to Capture: {e}")
-
-        update_frame_cam()
-
-    capture_btn=btn("Feature Extraction", 280, 360, 215, 35, 18, capture_and_next)
+    capture_btn = btn("Feature Extraction", 280, 360, 215, 35, 18,
+                      camera_stream(cam_canvas, folder_path1, "data_collection2"))
     btn_hover(capture_btn)
 
 def load_data_detection_page_2():
