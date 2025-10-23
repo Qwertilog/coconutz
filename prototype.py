@@ -291,6 +291,76 @@ def load_data_collection_page_1():
                       camera_stream(cam_canvas, folder_path1, "data_collection2"))
     btn_hover(capture_btn)
 
+def load_data_collection_page_2():
+    create_text("What is the classification of the\nCoconut?", 155, 50, 500, 400, 24, "bold")
+
+    def set_label_and_next(label):
+        global selected_label
+        selected_label = label
+        switch_page("data_collection3")
+
+    malakanin_btn=btn("Malakanin", 200, 160, 400, 46, 20, lambda: set_label_and_next("malakanin"))
+    btn_hover(malakanin_btn)
+
+    malauhog_btn=btn("Malauhog", 200, 240, 400, 46, 20, lambda: set_label_and_next("malauhog"))
+    btn_hover(malauhog_btn)
+
+    malakatad_btn=btn("Malakatad", 200, 320, 400, 46, 20, lambda: set_label_and_next("malakatad"))
+    btn_hover(malakatad_btn)
+
+def load_data_collection_page_3():
+    create_text("Are you sure this is\nthe right classification?", 75, 75, 650, 400, 42, "bold")
+
+    def confirm_yes():
+        global selected_file, selected_label
+        if selected_file and selected_label:        
+            features = camera_features(selected_file)  
+
+        save_features_to_csv(features, csv_path, selected_label)
+
+        try:
+            src = Path(selected_file)
+            # final filename: <label>_YYYYMMDD-HHMMSS.jpg
+            timestamp = time.strftime('%Y%m%d-%H%M%S')
+            dst_name = f"{selected_label}_{timestamp}{src.suffix}"
+            dst_path = folder_path1 / dst_name
+            src.replace(dst_path)  
+            selected_file = str(dst_path)
+        except Exception as e:
+            print("Warning: could not rename/move image:", e)
+
+        camera_prepro(selected_file)
+
+        switch_page("data_collection4")
+
+
+    yes=btn("Yes", 225, 250, 150, 80, 18, confirm_yes)
+    btn_hover(yes)
+    no=btn("No", 450, 250, 150, 80, 18, lambda: switch_page("data_collection2"))
+    btn_hover(no)
+
+def load_data_collection_page_4():
+    create_text("Would you like to\ncollect more data?", 75, 50, 640, 400, 48, "bold")
+
+    yes=btn("Yes", 215, 250, 150, 80, 18, lambda: switch_page("data_collection1"))
+    btn_hover(yes)
+
+    mm_btn=btn("Main Menu", 435, 250, 150, 80, 18, lambda: switch_page("main"))
+    btn_hover(mm_btn)
+
+def load_data_detection_page_1():
+    global video_capture
+    create_text("Image Capture", 200, 15, 400, 300, 32, "bold")
+    cam_canvas = Canvas(window, width=560, height=280, bg="#5A56C8",
+                        highlightthickness=0, bd=0)
+    cam_canvas.place(x=120, y=70)
+
+    if not USE_RPICAM:
+        video_capture = cv2.VideoCapture(0)
+    capture_btn = btn("Feature Extraction", 280, 360, 215, 35, 18,
+                      camera_stream(cam_canvas, folder_path1, "data_collection2"))
+    btn_hover(capture_btn)
+
 def load_data_detection_page_2():
     global selected_file
 
