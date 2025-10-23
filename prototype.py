@@ -10,6 +10,7 @@ import platform
 import threading
 import subprocess
 from joblib import load
+from picamera2 import PiCamera2
 from PIL import Image, ImageTk
 
 video_capture = None
@@ -25,10 +26,11 @@ USE_RPICAM = False
 
 # --- Try to detect RPiCam stack availability ---
 try:
-    subprocess.run(["rpicam-hello", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    from picamera2 import Picamera2
     USE_RPICAM = True
-except Exception:
+except ImportError:
     USE_RPICAM = False
+
 
 # --- Load model if available ---
 try:
@@ -147,36 +149,20 @@ def create_text(content, x, y, w, h, font_size, style):
 
 # --- Camera Processing --- #
 def get_rpicam_frame():
-    """Capture one frame from rpicam-vid using subprocess and return as numpy array."""
-    global rpicam_proc
-    cmd = [
-        "rpicam-vid",
-        "--nopreview",
-        "--timeout", "100",
-        "--width", "640",
-        "--height", "480",
-        "--output", "-",
-        "--codec", "mjpeg",
-        "--framerate", "30"
-    ]
-    rpicam_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    data = b''
+    """Capture a frame using the PiCamera2 interface."""
+    global picam2
     try:
-        while True:
-            chunk = rpicam_proc.stdout.read(1024)
-            if not chunk:
-                break
-            data += chunk
-            # attempt decode
-            frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-            if frame is not None:
-                rpicam_proc.terminate()
-                return frame
-    except Exception:
-        if rpicam_proc:
-            rpicam_proc.terminate()
+        if 'picam2' not in globals() or picam2 is None:
+            picam2 = Picamera2()
+            config = picam2.create_preview_configuration(main={"size": (640, 480)})
+            picam2.configure(config)
+            picam2.start()
+            time.sleep(0.2)  # allow sensor to warm up
+        frame = picam2.capture_array()
+        return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    except Exception as e:
+        print(f"[ERROR] PiCamera2 frame capture failed: {e}")
         return None
-    return None
 
 
 def camera_prepro(image_path):
