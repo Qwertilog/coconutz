@@ -344,7 +344,7 @@ def load_data_detection_page_1():
     if not USE_RPICAM:
         video_capture = cv2.VideoCapture(0)
     capture_btn = btn("Feature Extraction", 280, 360, 215, 35, 18,
-                      camera_stream(cam_canvas, folder_path1, "data_collection2"))
+                      camera_stream(cam_canvas, folder_path1, "data_detection2"))
     btn_hover(capture_btn)
 
 def load_data_detection_page_2():
