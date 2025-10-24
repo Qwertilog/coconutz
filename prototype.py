@@ -10,7 +10,7 @@ import platform
 import threading
 import subprocess
 from joblib import load
-from picamera2 import PiCamera2
+from picamera2 import Picamera2
 from PIL import Image, ImageTk
 
 video_capture = None
